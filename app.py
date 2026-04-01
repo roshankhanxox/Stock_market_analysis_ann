@@ -1,14 +1,21 @@
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-from tensorflow.keras.models import load_model
+from keras.models import load_model
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 st.set_page_config(page_title="Stock Predictor ANN", layout="wide")
 
 st.title("📈 Stock Market Trend Prediction (ANN)")
+st.markdown(
+    '<a href="https://www.kaggle.com/datasets/jacksoncrow/stock-market-dataset" target="_blank">Dataset</a>',
+    unsafe_allow_html=True
+)
 
 # ---------------------------
 # STOCK LIST
@@ -21,10 +28,18 @@ selected_stock = st.sidebar.selectbox("Select Stock", stocks)
 # ---------------------------
 # LOAD FILES
 # ---------------------------
-df = pd.read_csv(f"F:/mlproj/Stock_market_analysis_ann/data/projfiles/{selected_stock}.csv")
-model = load_model(f"F:/mlproj/Stock_market_analysis_ann/models/{selected_stock}_model.keras")
-scaler = joblib.load(f"F:/mlproj/Stock_market_analysis_ann/scalers/{selected_stock}_scaler.pkl")
-accuracy_df = pd.read_csv("F:/mlproj/Stock_market_analysis_ann/metrics/Accuracy.csv")
+@st.cache_resource
+def load_keras_model(stock):
+    return load_model(f"models/{stock}_model.keras", compile=False)
+
+@st.cache_resource
+def load_scaler(stock):
+    return joblib.load(f"scalers/{stock}_scaler.pkl")
+
+df = pd.read_csv(f"data/projfiles/{selected_stock}.csv")
+model = load_keras_model(selected_stock)
+scaler = load_scaler(selected_stock)
+accuracy_df = pd.read_csv("metrics/Accuracy.csv")
 
 # ---------------------------
 # FEATURE FUNCTION (IMPORTANT)
@@ -32,12 +47,12 @@ accuracy_df = pd.read_csv("F:/mlproj/Stock_market_analysis_ann/metrics/Accuracy.
 def create_features(df):
     df = df.copy()
 
-    df['Return'] = df['Close'].pct_change()
-    df['MA5'] = df['Close'].rolling(5).mean()
-    df['MA10'] = df['Close'].rolling(10).mean()
-    df['Diff'] = df['Close'] - df['Open']
-    df['Range'] = df['High'] - df['Low']
-    df['Trend'] = df['MA5'] - df['MA10']
+    df['Return'] = df['Close'].pct_change(fill_method=None) * 200
+    df['MA5']    = df['Close'].rolling(5).mean()
+    df['MA10']   = df['Close'].rolling(10).mean()
+    df['Diff']   = (df['Close'] - df['Open']) * 10
+    df['Range']  = (df['High'] - df['Low']) * 10
+    df['Trend']  = (df['MA5'] - df['MA10']) * 10
 
     df = df.replace([np.inf, -np.inf], np.nan)
     df = df.dropna()
@@ -136,15 +151,28 @@ with tab4:
 
         st.subheader("Enter Latest Day Data")
 
-        open_price = st.number_input("Open")
-        high = st.number_input("High")
-        low = st.number_input("Low")
-        close_price = st.number_input("Close")
-        volume = st.number_input("Volume")
+        csv_input = st.text_input("Paste values (Open, High, Low, Close, Volume)", placeholder="e.g. 255, 270, 252, 268, 50000000")
+
+        parsed = [0.0, 0.0, 0.0, 0.0, 0.0]
+        if csv_input.strip():
+            try:
+                parts = [float(x.strip()) for x in csv_input.split(",")]
+                if len(parts) == 5:
+                    parsed = parts
+                else:
+                    st.warning("Enter exactly 5 values: Open, High, Low, Close, Volume")
+            except ValueError:
+                st.warning("Invalid format — use numbers separated by commas")
+
+        open_price  = st.number_input("Open",   value=parsed[0])
+        high        = st.number_input("High",   value=parsed[1])
+        low         = st.number_input("Low",    value=parsed[2])
+        close_price = st.number_input("Close",  value=parsed[3])
+        volume      = st.number_input("Volume", value=parsed[4])
 
         if st.button("Predict"):
 
-            temp_df = df.tail(20).copy()
+            temp_df = df[['Open', 'High', 'Low', 'Close', 'Volume']].tail(20).copy()
 
             new_row = pd.DataFrame([{
                 'Open': open_price,
@@ -168,8 +196,8 @@ with tab4:
             input_data = scaler.transform([latest[features]])
 
             prob = model.predict(input_data)[0][0]
-            prob = prob + np.random.uniform(-0.05, 0.05)
-            prob = max(0, min(1, prob))
+            # prob = prob + np.random.uniform(-0.05, 0.05)
+            # prob = max(0, min(1, prob))
 
             prob = round(float(prob), 4)
             st.write(f"Raw Probability: {prob:.4f}")
